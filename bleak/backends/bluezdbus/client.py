@@ -51,6 +51,7 @@ class BleakClientBlueZDBus(BaseBleakClient):
         self._reactor = None
         self._rules = {}
         self._subscriptions = list()
+        self._device_disconnected = False
 
         self._disconnected_callback = None
 
@@ -218,26 +219,29 @@ class BleakClientBlueZDBus(BaseBleakClient):
             Boolean representing if device is disconnected.
 
         """
-        logger.debug("Disconnecting from BLE device...")
+        if not self._device_disconnected:
+            logger.debug("Disconnecting from BLE device...")
 
-        # Remove all residual notifications.
-        await self._cleanup_notifications()
+            # Remove all residual notifications.
+            await self._cleanup_notifications()
 
-        # Try to disconnect the actual device/peripheral
-        try:
-            await self._bus.callRemote(
-                self._device_path,
-                "Disconnect",
-                interface=defs.DEVICE_INTERFACE,
-                destination=defs.BLUEZ_SERVICE,
-            ).asFuture(self.loop)
-        except Exception as e:
-            logger.error("Attempt to disconnect device failed: {0}".format(e))
+            # Try to disconnect the actual device/peripheral
+            try:
+                await self._bus.callRemote(
+                    self._device_path,
+                    "Disconnect",
+                    interface=defs.DEVICE_INTERFACE,
+                    destination=defs.BLUEZ_SERVICE,
+                ).asFuture(self.loop)
+            except Exception as e:
+                logger.error("Attempt to disconnect device failed: {0}".format(e))
 
-        # See if it has been disconnected.
-        is_disconnected = not await self.is_connected()
+            # See if it has been disconnected.
+            is_disconnected = not await self.is_connected()
 
-        await self._cleanup_dbus_resources()
+            await self._cleanup_dbus_resources()
+        else:
+            is_disconnected = True
 
         return is_disconnected
 
@@ -720,7 +724,8 @@ class BleakClientBlueZDBus(BaseBleakClient):
                     and not message_body_map["Connected"]
                 ):
                     logger.debug("Device {} disconnected.".format(self.address))
-
+                    self._device_disconnected = True
+                    
                     task = self.loop.create_task(self._cleanup_all())
                     if self._disconnected_callback is not None:
                         task.add_done_callback(
